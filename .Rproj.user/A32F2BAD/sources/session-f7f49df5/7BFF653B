@@ -1,0 +1,27 @@
+{
+    "id": "7BFF653B",
+    "path": "~/glucecosoil/script.R",
+    "project_path": "script.R",
+    "type": "r_source",
+    "hash": "2640284262",
+    "contents": "",
+    "dirty": true,
+    "created": 1764250590442.0,
+    "source_on_save": false,
+    "relative_order": 1,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "487,29",
+        "scrollLine": "480"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1765472339,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1764959377425,
+    "read_only": false,
+    "read_only_alternatives": []
+}

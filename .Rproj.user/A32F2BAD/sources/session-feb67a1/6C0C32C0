@@ -1,0 +1,28 @@
+{
+    "id": "6C0C32C0",
+    "path": null,
+    "project_path": null,
+    "type": "object_explorer",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1759249943624.0,
+    "source_on_save": false,
+    "relative_order": 7,
+    "properties": {
+        "id": "20039ad2817940d791e5fb446d33629c",
+        "name": "physeq",
+        "title": "physeq",
+        "language": "R",
+        "source_window_id": "",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 0,
+    "encoding": "",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1759249943624,
+    "read_only": false,
+    "read_only_alternatives": []
+}

@@ -1,0 +1,13 @@
+SampleID,Glucose_Concentration,Day
+barcode01,Water,1
+barcode02,5,1
+barcode03,10,1
+barcode04,20,1
+barcode05,Water,2
+barcode06,5,2
+barcode07,10,2
+barcode08,20,2
+barcode09,Water,4
+barcode10,5,4
+barcode11,10,4
+barcode12,20,4

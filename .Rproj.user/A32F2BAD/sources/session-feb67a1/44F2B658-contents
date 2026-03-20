@@ -1,0 +1,177 @@
+---
+title: "Qubit Data Analysis Report"
+author: "AS3243"
+format: 
+  html:
+    embed-resources: true
+    toc: true
+editor: visual
+---
+
+## Introduction
+
+This report details the analysis of Qubit data collected over a 7-day experiment. The goal is to determine if Qubit values, a proxy for a biological measurement like DNA concentration, are related to the addition of different glucose concentrations (Water, 5mg/ml, 10mg/ml, 20mg/ml) over time.
+
+------------------------------------------------------------------------
+
+## 1. Data Loading and Tidying
+
+```{r data-tidying, message=FALSE, warning=FALSE}
+#| include: false
+# R Script to Parse Experimental Qubit Data and Create a Tidy Dataframe
+
+# --- 1. Raw Data Input ---
+# Storing the data provided in a multi-line string.
+raw_data_string <- "
+day 1: W1-208 W2-413 W3-295 51-148 52-281 53-215 101-17 102-169 103-232 201-131 202-131 203-95.3
+day 3: W1-139 W2-295 W3-260 51-128 52-90 53-222 101-347 102-195 103-228 201-278 202-211 203-256
+day 5: W1-207 W2-333 W3-275 51-211 52-153 53-193 101-249 102-246 103-224 201-267 202-267 203-193
+day 7: W1-165 W2-113 W3-214 51-201 52-279 53-340 101-211 102-223 103-251 201-267 202-241 203-275
+"
+
+# --- 2. Data Processing ---
+lines <- strsplit(raw_data_string, "\n")[[1]]
+lines <- lines[lines != ""]
+data_list <- list()
+
+for (current_line in lines) {
+  day_num <- as.numeric(gsub("day (\\d+):.*", "\\1", current_line))
+  measurements_str <- gsub("day \\d+: (.*)", "\\1", current_line)
+  measurements <- strsplit(measurements_str, " ")[[1]]
+  
+  for (measurement in measurements) {
+    parts <- strsplit(measurement, "-")[[1]]
+    sample_id <- parts[1]
+    qubit_value <- as.numeric(parts[2])
+    
+    concentration <- NA
+    replicate_num <- NA
+    
+    if (startsWith(sample_id, "W")) {
+      concentration <- "Water"
+      replicate_num <- as.numeric(gsub("W", "", sample_id))
+    } else if (startsWith(sample_id, "20")) {
+      concentration <- "20mg/ml"
+      replicate_num <- as.numeric(substring(sample_id, 3))
+    } else if (startsWith(sample_id, "10")) {
+      concentration <- "10mg/ml"
+      replicate_num <- as.numeric(substring(sample_id, 3))
+    } else if (startsWith(sample_id, "5")) {
+      concentration <- "5mg/ml"
+      replicate_num <- as.numeric(substring(sample_id, 2))
+    }
+    
+    data_list[[length(data_list) + 1]] <- data.frame(
+      Day = day_num,
+      Concentration = concentration,
+      Replicate = replicate_num,
+      QubitValue = qubit_value
+    )
+  }
+}
+
+qubit_df <- do.call(rbind, data_list)
+
+# --- 3. Final Touches ---
+concentration_levels <- c("Water", "5mg/ml", "10mg/ml", "20mg/ml")
+qubit_df$Concentration <- factor(qubit_df$Concentration, levels = concentration_levels)
+rownames(qubit_df) <- NULL
+
+# --- 4. Display the Result ---
+print("Data successfully converted into a tidy dataframe!")
+knitr::kable(head(qubit_df), caption = "First 6 Rows of the Tidy Dataframe")
+```
+
+(`str`) to make sure all data types are correct.
+
+```{r data-structure, echo=TRUE}
+str(qubit_df)
+```
+
+------------------------------------------------------------------------
+
+## 2. Analysis and Visualisation
+
+start by calculating summary statistics (mean and standard deviation) for each group and then create a plot to visualise the trends over time.
+
+```{r analysis-viz, echo=TRUE, message=FALSE, warning=FALSE}
+# Load necessary packages
+library(dplyr)
+library(ggplot2)
+
+# Calculate summary statistics
+summary_stats <- qubit_df %>%
+  group_by(Day, Concentration) %>%
+  summarise(
+    MeanQubit = mean(QubitValue, na.rm = TRUE),
+    SD = sd(QubitValue, na.rm = TRUE),
+    .groups = 'drop' 
+  )
+
+# Print the summary table
+knitr::kable(summary_stats, caption = "Summary Statistics (Mean & SD) by Group")
+
+# Create the plot
+qubit_plot <- ggplot(summary_stats, aes(x = Day, y = MeanQubit, group = Concentration, color = Concentration)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = MeanQubit - SD, ymax = MeanQubit + SD),
+    width = 0.2,
+    linewidth = 0.5
+  ) +
+  labs(
+    title = "Qubit Value Over Time by Glucose Concentration",
+    subtitle = "Values shown as Mean ± Standard Deviation",
+    x = "Day of Experiment",
+    y = "Mean Qubit Value",
+    color = "Glucose Level"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "bottom"
+  )
+
+# Display the plot
+print(qubit_plot)
+```
+
+The plot clearly shows different trends for each glucose concentration over the 7-day period. The lines are not parallel.
+
+------------------------------------------------------------------------
+
+## 3. Statistical Analysis
+
+To formally test the relationship we see in the plot, we will run a two-way Analysis of Variance (ANOVA). This will tell us if the Day, the Concentration, or their interaction has a statistically significant effect on the Qubit value.
+
+### ANOVA Results
+
+```{r anova, echo=TRUE}
+# Run the ANOVA
+anova_results <- aov(QubitValue ~ as.factor(Day) * Concentration, data = qubit_df)
+
+# Print the summary table
+summary(anova_results)
+```
+
+The ANOVA results show a highly significant interaction effect between `Day` and `Concentration` (p \< 0.01). This confirms that the effect of glucose on the Qubit value depends on which day of the experiment we are looking at.
+
+### Post-Hoc Test (Tukey's HSD)
+
+Since the interaction is significant, we can run a Tukey's HSD test to see which specific group pairs are significantly different from one another.
+
+```{r tukey, echo=TRUE}
+# Run and print the Tukey HSD results
+tukey_results <- TukeyHSD(anova_results)
+print(tukey_results)
+```
+
+The Tukey test compares all 16 groups (4 days x 4 concentrations) to each other. We look for pairs with an adjusted p-value (`p adj`) of less than 0.05. In this case, no pairs strictly meet this threshold, but the comparison between `1:20mg/ml Glucose` and `1:Water` is marginally significant (p ≈ 0.054), suggesting a notable difference at Day 1 However, thios was before any experimental conditions were applied, and just a baseline result, so does not show anything of value within this experiment.
+
+------------------------------------------------------------------------
+
+## Conclusion
+
+The analysis indicates a significant interaction between the day of the experiment and the glucose concentration. The strongest trend was observed on Day 1, where 20% glucose appeared to lower the Qubit value compared to the water control. The lack of more significant pairwise differences, despite a significant interaction in the ANOVA, is likely due to high variability between the replicates.

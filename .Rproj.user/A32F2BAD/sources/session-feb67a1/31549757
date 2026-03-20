@@ -1,0 +1,28 @@
+{
+    "id": "31549757",
+    "path": null,
+    "project_path": null,
+    "type": "object_explorer",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1759249960811.0,
+    "source_on_save": false,
+    "relative_order": 8,
+    "properties": {
+        "id": "5058bcb431e94eacb7f8e50aa60ff6c7",
+        "name": "physeq_rel",
+        "title": "physeq_rel",
+        "language": "R",
+        "source_window_id": "",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 3544678301105201787,
+    "encoding": "",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1759249960811,
+    "read_only": false,
+    "read_only_alternatives": []
+}

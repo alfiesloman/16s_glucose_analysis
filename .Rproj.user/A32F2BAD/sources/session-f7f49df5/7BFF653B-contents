@@ -1,0 +1,507 @@
+# Microbiome Analysis Workflow in R - GENUS LEVEL
+# This script performs a complete analysis workflow on genus-level abundance data.
+
+# --- 1. Load Libraries ---
+library(phyloseq)
+library(tidyverse) # Includes ggplot2, dplyr, etc.
+library(vegan)
+
+
+print("--- Step 1: Loading and Preparing Data (Genus) ---")
+
+# --- Define File Paths ---
+abundance_file <- "genus_abundance_table.csv"
+metadata_file <- "metadata.csv"
+output_prefix <- "genus_analysis_R"
+
+# --- Load Data ---
+# row.names=1 sets the first column (taxa names) as the row names
+abundance_table_df <- read.csv(abundance_file, row.names = 1, check.names = FALSE)
+# row.names=1 sets the first column (SampleID) as the row names
+metadata_table <- read.csv(metadata_file, row.names = 1)
+
+
+# --- FIX: Robustly convert the abundance data to a numeric matrix ---
+# This multi-step process is more robust than direct conversion. It handles
+# cases where R might silently keep data as non-numeric characters or factors.
+
+# 1. Unlist the data frame into a single vector and force it to be numeric.
+#    This will introduce NA for any values that can't be converted.
+numeric_vector <- as.numeric(unlist(abundance_table_df))
+
+# 2. Reshape this vector back into a matrix with the original dimensions.
+abundance_matrix <- matrix(numeric_vector,
+                           nrow = nrow(abundance_table_df),
+                           ncol = ncol(abundance_table_df))
+
+# 3. Restore the original row (taxa) and column (sample) names.
+rownames(abundance_matrix) <- rownames(abundance_table_df)
+colnames(abundance_matrix) <- colnames(abundance_table_df)
+
+# 4. Replace any NAs that were introduced during coercion with 0.
+abundance_matrix[is.na(abundance_matrix)] <- 0
+
+# Ensure metadata is a data.frame for phyloseq
+metadata_table <- as.data.frame(metadata_table)
+
+# FIX: Convert 'Day' column to a factor for plotting aesthetics
+metadata_table$Day <- as.factor(metadata_table$Day)
+
+# 🌟 NEW FIX: Create a Time_Point column with the desired labels 🌟
+# Map: 1 -> T0, 2 -> 48hrs, 4 -> 96hrs
+metadata_table <- metadata_table %>%
+  mutate(Time_Point = case_when(
+    Day == "1" ~ "T0",
+    Day == "2" ~ "48hrs",
+    Day == "4" ~ "96hrs",
+    .default = as.character(Day) # Keep other values if they exist
+  ))
+
+# Ensure Time_Point is an *ordered* factor for correct plotting order
+# Ensure Time_Point is an *ordered* factor for correct plotting order
+metadata_table$Time_Point <- factor(metadata_table$Time_Point,
+                                    levels = c("T0", "48hrs", "96hrs"),
+                                    ordered = TRUE)
+
+
+# --- Create Phyloseq Object ---
+# This object conveniently bundles your abundance and metadata tables.
+OTU <- otu_table(abundance_matrix, taxa_are_rows = TRUE)
+META <- sample_data(metadata_table)
+
+# FIX: Create and add a taxonomy table to resolve heatmap error
+taxa_names <- rownames(abundance_matrix)
+tax_table_df <- data.frame(Genus = taxa_names) # Changed to Genus
+rownames(tax_table_df) <- taxa_names
+TAX <- tax_table(as.matrix(tax_table_df))
+
+physeq <- phyloseq(OTU, META, TAX)
+
+# --- FIX: Create and apply descriptive sample names AFTER phyloseq object creation ---
+# Use the NEW Time_Point column for descriptive names
+meta_df <- as(sample_data(physeq), "data.frame")
+descriptive_sample_names <- paste(meta_df$Glucose_Concentration, "_", meta_df$Time_Point, sep = "")
+sample_names(physeq) <- descriptive_sample_names
+
+
+# Normalize to relative abundance (for beta diversity and heatmaps)
+physeq_rel <- transform_sample_counts(physeq, function(x) x / sum(x))
+
+print("Data loaded into phyloseq object and normalized successfully.")
+
+# --- 2. Alpha Diversity Analysis ---
+print("--- Step 2: Alpha Diversity Analysis ---")
+
+# --- FIX: Create a clean data frame for plotting to resolve aesthetic error ---
+# Combine diversity estimates and metadata into a single, clean data frame.
+alpha_div_estimates <- estimate_richness(physeq, measures = "Shannon")
+metadata_df_for_plot <- as(sample_data(physeq), "data.frame")
+plot_data <- cbind(alpha_div_estimates, metadata_df_for_plot)
+
+
+# Create the line plot using the NEW Time_Point column
+alpha_plot <- ggplot(plot_data, aes(x = Time_Point, y = Shannon, group = Glucose_Concentration, color = Glucose_Concentration)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  labs(title = "Alpha Diversity (Shannon Index) Over Time - Genus Level",
+       x = "Time Point", # 🌟 UPDATED AXIS LABEL 🌟
+       y = "Shannon Diversity Index",
+       color = "Glucose") +
+  theme_bw()
+
+# Save the plot
+ggsave(paste0(output_prefix, "_alpha_diversity_lineplot.png"), plot = alpha_plot, width = 8, height = 6)
+print(paste("Alpha diversity line plot saved to", paste0(output_prefix, "_alpha_diversity_lineplot.png")))
+
+
+# Statistical test (Kruskal-Wallis) for Glucose effect on 96hrs (was Day 4)
+print("Running Kruskal-Wallis test for Glucose effect on 96hrs...") # 🌟 UPDATED PRINT 🌟
+day4_data_for_test <- subset(plot_data, Time_Point == "96hrs") # 🌟 UPDATED SUBSET 🌟
+kw_test <- kruskal.test(Shannon ~ Glucose_Concentration, data = day4_data_for_test)
+print(kw_test)
+
+# --- Pairwise Alpha Diversity Tests by Time Point (Wilcoxon Rank-Sum Test) ---
+print("--- Running Pairwise Alpha Diversity Tests between Time Points ---") # 🌟 UPDATED PRINT 🌟
+
+# Compare T0 vs 48hrs (was Day 1 vs Day 2)
+print("--- T0 vs 48hrs ---") # 🌟 UPDATED PRINT 🌟
+data_d1_d2 <- subset(plot_data, Time_Point %in% c("T0", "48hrs")) # 🌟 UPDATED SUBSET 🌟
+wilcox_d1_d2 <- wilcox.test(Shannon ~ Time_Point, data = data_d1_d2) # 🌟 UPDATED VARIABLE 🌟
+print(wilcox_d1_d2)
+
+# Compare T0 vs 96hrs (was Day 1 vs Day 4)
+print("--- T0 vs 96hrs ---") # 🌟 UPDATED PRINT 🌟
+data_d1_d4 <- subset(plot_data, Time_Point %in% c("T0", "96hrs")) # 🌟 UPDATED SUBSET 🌟
+wilcox_d1_d4 <- wilcox.test(Shannon ~ Time_Point, data = data_d1_d4) # 🌟 UPDATED VARIABLE 🌟
+print(wilcox_d1_d4)
+
+# Compare 48hrs vs 96hrs (was Day 2 vs Day 4)
+print("--- 48hrs vs 96hrs ---") # 🌟 UPDATED PRINT 🌟
+data_d2_d4 <- subset(plot_data, Time_Point %in% c("48hrs", "96hrs")) # 🌟 UPDATED SUBSET 🌟
+wilcox_d2_d4 <- wilcox.test(Shannon ~ Time_Point, data = data_d2_d4) # 🌟 UPDATED VARIABLE 🌟
+print(wilcox_d2_d4)
+
+
+# --- 3. Beta Diversity Analysis ---
+print("--- Step 3: Beta Diversity Analysis ---")
+
+# Calculate Bray-Curtis dissimilarity and perform PCoA using the relative abundance data
+pcoa_bray <- ordinate(physeq_rel, method = "PCoA", distance = "bray")
+
+# Plot the PCoA, using the NEW Time_Point column for shape
+beta_plot <- plot_ordination(physeq_rel, pcoa_bray, color = "Glucose_Concentration", shape = "Time_Point") + # 🌟 UPDATED SHAPE VARIABLE 🌟
+  geom_point(size = 5) +
+  labs(title = "Beta Diversity (Bray-Curtis PCoA) - Genus Level",
+       color = "Glucose",
+       shape = "Time Point") + # 🌟 UPDATED SHAPE LABEL 🌟
+  theme_bw()
+
+# Save the plot
+ggsave(paste0(output_prefix, "_beta_diversity_pcoa.png"), plot = beta_plot, width = 8, height = 7)
+print(paste("Beta diversity PCoA plot saved to", paste0(output_prefix, "_beta_diversity_pcoa.png")))
+
+# To test for significance of clustering, we use PERMANOVA from the vegan package
+print("Running PERMANOVA test on combined model...")
+bray_dist <- phyloseq::distance(physeq_rel, method = "bray")
+# 🌟 UPDATED MODEL: Replaced 'Day' with 'Time_Point' 🌟
+permanova_result <- adonis2(bray_dist ~ Glucose_Concentration + Time_Point, data = as(sample_data(physeq), "data.frame"))
+print(permanova_result)
+
+# --- PERMANOVA by individual factors to determine a hierarchy of effect sizes ---
+print("--- Running PERMANOVA for each factor to compare R2 values ---")
+
+# Test the effect of Time_Point alone (was Day)
+print("--- Testing the effect of Time Point alone ---") # 🌟 UPDATED PRINT 🌟
+# 🌟 UPDATED MODEL: Replaced 'Day' with 'Time_Point' 🌟
+permanova_day <- adonis2(bray_dist ~ Time_Point, data = as(sample_data(physeq), "data.frame"))
+print(permanova_day)
+
+# Test the effect of Glucose Concentration alone
+print("--- Testing the effect of Glucose Concentration alone ---")
+permanova_glucose <- adonis2(bray_dist ~ Glucose_Concentration, data = as(sample_data(physeq), "data.frame"))
+print(permanova_glucose)
+
+# --- NEW: Pairwise PERMANOVA to test specific hypotheses ---
+print("--- Running Pairwise PERMANOVA to test Water vs 20 Glucose ---")
+# Create a subset of the data containing only the groups we want to compare
+physeq_subset_wv20 <- subset_samples(physeq_rel, Glucose_Concentration %in% c("Water", "20"))
+# Calculate Bray-Curtis distance for this subset
+bray_dist_subset <- phyloseq::distance(physeq_subset_wv20, method = "bray")
+# Run PERMANOVA on the subset
+permanova_pairwise <- adonis2(bray_dist_subset ~ Glucose_Concentration, data = as(sample_data(physeq_subset_wv20), "data.frame"))
+print(permanova_pairwise)
+
+
+# --- 4. Differential Abundance Analysis (Heatmap) ---
+print("--- Step 4: Differential Abundance Analysis (Heatmap) ---")
+
+# Get the top 10 most abundant genera to make the plot cleaner
+top_taxa_n <- 10
+top_taxa <- names(sort(taxa_sums(physeq), decreasing = TRUE)[1:top_taxa_n])
+physeq_top_taxa <- prune_taxa(top_taxa, physeq_rel)
+
+# --- FIX: Create a custom sample order for the heatmap x-axis ---
+# Get metadata to determine the order
+meta_df_for_ordering <- as(sample_data(physeq_top_taxa), "data.frame")
+# Create ordered factors to sort by
+# 🌟 UPDATED ORDERING: Use the NEW Time_Point column 🌟
+meta_df_for_ordering$Time_Point <- factor(meta_df_for_ordering$Time_Point, levels = c("T0", "48hrs", "96hrs"), ordered = TRUE)
+meta_df_for_ordering$Glucose_Concentration <- factor(meta_df_for_ordering$Glucose_Concentration, levels = c("Water", "5", "10", "20"), ordered = TRUE)
+# Order the data frame based on Time_Point, then Glucose
+meta_df_for_ordering <- meta_df_for_ordering[order(meta_df_for_ordering$Time_Point, meta_df_for_ordering$Glucose_Concentration), ]
+# Get the correctly ordered sample names from the row names of the ordered metadata
+ordered_samples <- rownames(meta_df_for_ordering)
+
+
+# FIX: Create the heatmap, providing the new custom order
+heatmap_plot <- plot_heatmap(physeq_top_taxa,
+                             method = NULL, # Disable automatic sample reordering
+                             sample.order = ordered_samples, # Provide our custom order
+                             taxa.label = "Genus", # Changed to Genus
+                             low = "#FFFFFF", high = "#008000", # Color gradient
+                             title = paste("Top", top_taxa_n, "Most Abundant Genera")) + # Changed Title
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) # Rotate labels
+
+# Save the plot with dimensions suitable for the single heatmap format
+ggsave(paste0(output_prefix, "_abundance_heatmap.png"), plot = heatmap_plot, width = 10, height = 8)
+print(paste("Abundance heatmap saved to", paste0(output_prefix, "_abundance_heatmap.png")))
+
+# -----------------------------------------------------------------------------
+# 🌟 NEW SECTION: 5. Community Composition (Stacked Bar Plot) - GENUS LEVEL 🌟
+# -----------------------------------------------------------------------------
+print("--- Step 5: Community Composition (Stacked Bar Plot) - Genus Level ---")
+
+# Re-order the samples in the physeq object based on Time_Point and Glucose for plotting
+# Note: phyloseq uses internal sample names, so we set them to match the desired order
+sample_data(physeq_rel) <- sample_data(physeq_rel)[ordered_samples, ]
+
+# Create the stacked bar plot using the full relative abundance data
+genus_bar_plot <- plot_bar(physeq_rel, 
+                           fill = "Genus", # The taxa column we created earlier
+                           x = "Sample") + 
+  geom_bar(aes(fill = Genus), stat = "identity", position = "stack") +
+  labs(title = "Relative Abundance of All Genera",
+       x = "Sample (Glucose Concentration and Time Point)",
+       y = "Relative Abundance") +
+  theme_bw() +
+  # Customizing the x-axis to display the descriptive names clearly
+  scale_x_discrete(breaks = ordered_samples,
+                   labels = ordered_samples) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+        legend.position = "right") 
+
+# Save the stacked bar plot
+ggsave(paste0(output_prefix, "_relative_abundance_barplot.png"), plot = genus_bar_plot, width = 12, height = 7)
+print(paste("Relative abundance stacked bar plot saved to", paste0(output_prefix, "_relative_abundance_barplot.png")))
+
+
+print("Workflow complete.")
+
+
+#############################################################################
+#       SPECIES ###########################################################
+#############################################################################
+# Microbiome Analysis Workflow in R
+# This script performs the same analysis as the Python equivalent, using
+# the phyloseq, vegan, and ggplot2 packages.
+
+# --- 1. Load Libraries ---
+library(phyloseq)
+library(tidyverse) # Includes ggplot2, dplyr, etc.
+library(vegan)
+
+print("--- Step 1: Loading and Preparing Data (Species) ---")
+
+# --- Define File Paths ---
+abundance_file <- "species_abundance_table.csv"
+metadata_file <- "metadata.csv"
+output_prefix <- "species_analysis_R"
+
+# --- Load Data ---
+# row.names=1 sets the first column (taxa names) as the row names
+abundance_table_df <- read.csv(abundance_file, row.names = 1, check.names = FALSE)
+# row.names=1 sets the first column (SampleID) as the row names
+metadata_table <- read.csv(metadata_file, row.names = 1)
+
+
+# --- FIX: Robustly convert the abundance data to a numeric matrix ---
+numeric_vector <- as.numeric(unlist(abundance_table_df))
+abundance_matrix <- matrix(numeric_vector,
+                           nrow = nrow(abundance_table_df),
+                           ncol = ncol(abundance_table_df))
+rownames(abundance_matrix) <- rownames(abundance_table_df)
+colnames(abundance_matrix) <- colnames(abundance_table_df)
+abundance_matrix[is.na(abundance_matrix)] <- 0
+
+# Ensure metadata is a data.frame for phyloseq
+metadata_table <- as.data.frame(metadata_table)
+
+# FIX: Convert 'Day' column to a factor for plotting aesthetics
+metadata_table$Day <- as.factor(metadata_table$Day)
+
+# 🌟 NEW FIX: Create a Time_Point column with the desired labels 🌟
+# Map: 1 -> T0, 2 -> 48hrs, 4 -> 96hrs
+metadata_table <- metadata_table %>%
+  mutate(Time_Point = case_when(
+    Day == "1" ~ "T0",
+    Day == "2" ~ "48hrs",
+    Day == "4" ~ "96hrs",
+    .default = as.character(Day) # Keep other values if they exist
+  ))
+
+# 🌟 FIX APPLIED HERE: Corrected the invalid space character 🌟
+# Ensure Time_Point is an *ordered* factor for correct plotting order
+metadata_table$Time_Point <- factor(metadata_table$Time_Point, 
+                                    levels = c("T0", "48hrs", "96hrs"), 
+                                    ordered = TRUE)
+
+
+# --- Create Phyloseq Object ---
+OTU <- otu_table(abundance_matrix, taxa_are_rows = TRUE)
+META <- sample_data(metadata_table)
+
+# FIX: Create and add a taxonomy table to resolve heatmap error
+taxa_names <- rownames(abundance_matrix)
+tax_table_df <- data.frame(Species = taxa_names) # Changed from Genus to Species
+rownames(tax_table_df) <- taxa_names
+TAX <- tax_table(as.matrix(tax_table_df))
+
+physeq <- phyloseq(OTU, META, TAX)
+
+# --- FIX: Create and apply descriptive sample names AFTER phyloseq object creation ---
+# Use the NEW Time_Point column for descriptive names
+meta_df <- as(sample_data(physeq), "data.frame")
+descriptive_sample_names <- paste(meta_df$Glucose_Concentration, "_", meta_df$Time_Point, sep = "")
+sample_names(physeq) <- descriptive_sample_names
+
+
+# Normalize to relative abundance (for beta diversity and heatmaps)
+physeq_rel <- transform_sample_counts(physeq, function(x) x / sum(x))
+
+print("Data loaded into phyloseq object and normalized successfully.")
+
+# --- 2. Alpha Diversity Analysis ---
+print("--- Step 2: Alpha Diversity Analysis ---")
+
+# Get all alpha diversity estimates at once
+alpha_div_estimates <- estimate_richness(physeq, measures = "Shannon")
+# Get metadata as a standard data frame
+metadata_df_for_plot <- as(sample_data(physeq), "data.frame")
+
+# --- FIX: Create a clean data frame for plotting to resolve aesthetic error ---
+# Combine diversity estimates and metadata into a single, clean data frame.
+plot_data <- cbind(alpha_div_estimates, metadata_df_for_plot)
+
+
+# Create the line plot using the NEW Time_Point column
+alpha_plot <- ggplot(plot_data, aes(x = Time_Point, y = Shannon, group = Glucose_Concentration, color = Glucose_Concentration)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 3) +
+  labs(title = "Alpha Diversity (Shannon Index) Over Time",
+       x = "Time Point", # 🌟 UPDATED AXIS LABEL 🌟
+       y = "Shannon Diversity Index",
+       color = "Glucose") +
+  theme_bw()
+
+# Save the plot
+ggsave(paste0(output_prefix, "_alpha_diversity_lineplot.png"), plot = alpha_plot, width = 8, height = 6)
+print(paste("Alpha diversity line plot saved to", paste0(output_prefix, "_alpha_diversity_lineplot.png")))
+
+
+# Statistical test (Kruskal-Wallis) for Glucose effect on 96hrs (was Day 4)
+print("Running Kruskal-Wallis test for Glucose effect on 96hrs...") 
+day4_data_for_test <- subset(plot_data, Time_Point == "96hrs")
+kw_test <- kruskal.test(Shannon ~ Glucose_Concentration, data = day4_data_for_test)
+print(kw_test)
+
+# --- Pairwise Alpha Diversity Tests by Time Point (Wilcoxon Rank-Sum Test) ---
+print("--- Running Pairwise Alpha Diversity Tests between Time Points ---")
+
+# Compare T0 vs 48hrs (was Day 1 vs Day 2)
+print("--- T0 vs 48hrs ---") 
+data_d1_d2 <- subset(plot_data, Time_Point %in% c("T0", "48hrs")) 
+wilcox_d1_d2 <- wilcox.test(Shannon ~ Time_Point, data = data_d1_d2) 
+print(wilcox_d1_d2)
+
+# Compare T0 vs 96hrs (was Day 1 vs Day 4)
+print("--- T0 vs 96hrs ---") 
+data_d1_d4 <- subset(plot_data, Time_Point %in% c("T0", "96hrs")) 
+wilcox_d1_d4 <- wilcox.test(Shannon ~ Time_Point, data = data_d1_d4) 
+print(wilcox_d1_d4)
+
+# Compare 48hrs vs 96hrs (was Day 2 vs Day 4)
+print("--- 48hrs vs 96hrs ---") 
+data_d2_d4 <- subset(plot_data, Time_Point %in% c("48hrs", "96hrs"))
+wilcox_d2_d4 <- wilcox.test(Shannon ~ Time_Point, data = data_d2_d4)
+print(wilcox_d2_d4)
+
+
+# --- 3. Beta Diversity Analysis ---
+print("--- Step 3: Beta Diversity Analysis ---")
+
+# Calculate Bray-Curtis dissimilarity and perform PCoA using the relative abundance data
+pcoa_bray <- ordinate(physeq_rel, method = "PCoA", distance = "bray")
+
+# Plot the PCoA, using the NEW Time_Point column for shape
+beta_plot <- plot_ordination(physeq_rel, pcoa_bray, color = "Glucose_Concentration", shape = "Time_Point") + 
+  geom_point(size = 5) +
+  labs(title = "Beta Diversity (Bray-Curtis PCoA)",
+       color = "Glucose",
+       shape = "Time Point") + 
+  theme_bw()
+
+# Save the plot
+ggsave(paste0(output_prefix, "_beta_diversity_pcoa.png"), plot = beta_plot, width = 8, height = 7)
+print(paste("Beta diversity PCoA plot saved to", paste0(output_prefix, "_beta_diversity_pcoa.png")))
+
+# To test for significance of clustering, we use PERMANOVA from the vegan package
+print("Running PERMANOVA test on combined model...")
+bray_dist <- phyloseq::distance(physeq_rel, method = "bray")
+permanova_result <- adonis2(bray_dist ~ Glucose_Concentration + Time_Point, data = as(sample_data(physeq), "data.frame"))
+print(permanova_result)
+
+# --- PERMANOVA by individual factors to determine a hierarchy of effect sizes ---
+print("--- Running PERMANOVA for each factor to compare R2 values ---")
+
+# Test the effect of Time_Point alone (was Day)
+print("--- Testing the effect of Time Point alone ---") 
+permanova_day <- adonis2(bray_dist ~ Time_Point, data = as(sample_data(physeq), "data.frame"))
+print(permanova_day)
+
+# Test the effect of Glucose Concentration alone
+print("--- Testing the effect of Glucose Concentration alone ---")
+permanova_glucose <- adonis2(bray_dist ~ Glucose_Concentration, data = as(sample_data(physeq), "data.frame"))
+print(permanova_glucose)
+
+# --- NEW: Pairwise PERMANOVA to test specific hypotheses ---
+print("--- Running Pairwise PERMANOVA to test Water vs 20 Glucose ---")
+# Create a subset of the data containing only the groups we want to compare
+physeq_subset_wv20 <- subset_samples(physeq_rel, Glucose_Concentration %in% c("Water", "20"))
+# Calculate Bray-Curtis distance for this subset
+bray_dist_subset <- phyloseq::distance(physeq_subset_wv20, method = "bray")
+# Run PERMANOVA on the subset
+permanova_pairwise <- adonis2(bray_dist_subset ~ Glucose_Concentration, data = as(sample_data(physeq_subset_wv20), "data.frame"))
+print(permanova_pairwise)
+
+
+# --- 4. Differential Abundance Analysis (Heatmap) ---
+print("--- Step 4: Differential Abundance Analysis (Heatmap) ---")
+
+# Get the top 10 most abundant species to make the plot cleaner
+top_taxa_n <- 10
+top_taxa <- names(sort(taxa_sums(physeq), decreasing = TRUE)[1:top_taxa_n])
+physeq_top_taxa <- prune_taxa(top_taxa, physeq_rel)
+
+# --- FIX: Create a custom sample order for the heatmap x-axis ---
+# Get metadata to determine the order
+meta_df_for_ordering <- as(sample_data(physeq_top_taxa), "data.frame")
+# Create ordered factors to sort by
+meta_df_for_ordering$Time_Point <- factor(meta_df_for_ordering$Time_Point, levels = c("T0", "48hrs", "96hrs"), ordered = TRUE)
+meta_df_for_ordering$Glucose_Concentration <- factor(meta_df_for_ordering$Glucose_Concentration, levels = c("Water", "5", "10", "20"), ordered = TRUE)
+# Order the data frame based on Time_Point, then Glucose
+meta_df_for_ordering <- meta_df_for_ordering[order(meta_df_for_ordering$Time_Point, meta_df_for_ordering$Glucose_Concentration), ]
+# Get the correctly ordered sample names from the row names of the ordered metadata
+ordered_samples <- rownames(meta_df_for_ordering)
+
+
+# FIX: Create the heatmap, providing the new custom order
+heatmap_plot <- plot_heatmap(physeq_top_taxa,
+                             method = NULL, # Disable automatic sample reordering
+                             sample.order = ordered_samples, # Provide our custom order
+                             taxa.label = "Species", # Changed from Genus to Species
+                             low = "#FFFFFF", high = "#008000", # Color gradient
+                             title = paste("Top", top_taxa_n, "Most Abundant Species")) + # Changed Title
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) # Rotate labels
+
+# Save the plot with dimensions suitable for the single heatmap format
+ggsave(paste0(output_prefix, "_abundance_heatmap.png"), plot = heatmap_plot, width = 10, height = 8)
+print(paste("Abundance heatmap saved to", paste0(output_prefix, "_abundance_heatmap.png")))
+
+# -----------------------------------------------------------------------------
+# 🌟 NEW SECTION: 5. Community Composition (Stacked Bar Plot) - SPECIES LEVEL 🌟
+# -----------------------------------------------------------------------------
+print("--- Step 5: Community Composition (Stacked Bar Plot) - Species Level ---")
+
+# Re-order the samples in the physeq object based on Time_Point and Glucose for plotting
+sample_data(physeq_rel) <- sample_data(physeq_rel)[ordered_samples, ]
+
+# Create the stacked bar plot using the full relative abundance data
+species_bar_plot <- plot_bar(physeq_rel, 
+                             fill = "Species", # The taxa column we created earlier
+                             x = "Sample") + # *** FIX APPLIED HERE: Changed "Sample_ID" to "Sample" ***
+  geom_bar(aes(fill = Species), stat = "identity", position = "stack") +
+  labs(title = "Relative Abundance of All Species",
+       x = "Sample (Glucose Concentration and Time Point)",
+       y = "Relative Abundance") +
+  theme_bw() +
+  # Customizing the x-axis to display the descriptive names clearly
+  scale_x_discrete(breaks = ordered_samples,
+                   labels = ordered_samples) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = 8),
+        legend.position = "right") 
+
+# Save the stacked bar plot
+ggsave(paste0(output_prefix, "_relative_abundance_barplot.png"), plot = species_bar_plot, width = 12, height = 7)
+print(paste("Relative abundance stacked bar plot saved to", paste0(output_prefix, "_relative_abundance_barplot.png")))
+
+print("Workflow complete.")

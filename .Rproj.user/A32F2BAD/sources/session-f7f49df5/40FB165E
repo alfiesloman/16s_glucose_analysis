@@ -1,0 +1,28 @@
+{
+    "id": "40FB165E",
+    "path": null,
+    "project_path": null,
+    "type": "object_explorer",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1764348906888.0,
+    "source_on_save": false,
+    "relative_order": 6,
+    "properties": {
+        "id": "03940f714aee44f9b972f02632015255",
+        "name": "alpha_plot",
+        "title": "alpha_plot",
+        "language": "R",
+        "source_window_id": "",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 2228632199504,
+    "encoding": "",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1764348906888,
+    "read_only": false,
+    "read_only_alternatives": []
+}
